@@ -1,8 +1,36 @@
-<?php session_start();
+<?php
+/* Detect HTTPS — handle reverse proxy (LiteSpeed/Nginx) yang forward via X-Forwarded-Proto */
+$isHttps=(isset($_SERVER['HTTPS'])&&$_SERVER['HTTPS']!=='off')
+  ||(isset($_SERVER['HTTP_X_FORWARDED_PROTO'])&&$_SERVER['HTTP_X_FORWARDED_PROTO']==='https')
+  ||(isset($_SERVER['HTTP_X_FORWARDED_SSL'])&&$_SERVER['HTTP_X_FORWARDED_SSL']==='on')
+  ||($_SERVER['SERVER_PORT']??80)==443;
+
+/* Session cookie: secure hanya kalau HTTPS, SameSite=Lax agar tidak drop pas redirect */
+session_set_cookie_params([
+  'lifetime'=>0,
+  'path'=>'/',
+  'domain'=>'',
+  'secure'=>$isHttps,
+  'httponly'=>true,
+  'samesite'=>'Lax',
+]);
+session_start();
+
+/* Helper redirect yang selalu pakai full URL agar tidak turun ke HTTP */
+function safeRedirect($queryString=''){
+  global $isHttps;
+  $scheme=$isHttps?'https':'http';
+  $host=$_SERVER['HTTP_HOST'];
+  $path=strtok($_SERVER['REQUEST_URI'],'?');
+  $url=$scheme.'://'.$host.$path.($queryString?'?'.$queryString:'');
+  header('Location: '.$url,true,302);
+  exit;
+}
+
 $basePath=realpath('/home/ubuntu/mcserver');if(!$basePath){exit('Invalid base path');}
 $allowedWritable=['worlds','server.properties'];$uploadMaxSize=3*1024*1024*1024;$username='koba';$password='console';
-if(isset($_GET['logout'])){session_destroy();header('Location: ?');exit;}
-if(!isset($_SESSION['auth'])){if(isset($_POST['u'])&&isset($_POST['p'])){if($_POST['u']===$username&&$_POST['p']===$password){$_SESSION['auth']=true;header('Location: ?');exit;}else{$error='Invalid credentials';}}?><!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Console Login</title><style>*{margin:0;padding:0;box-sizing:border-box;}body{background:#FF6B6B;font-family:'Courier New',monospace;display:flex;justify-content:center;align-items:center;height:100vh;border:4px solid #000;}.login-box{background:#FFE66D;border:4px solid #000;padding:40px;box-shadow:8px 8px 0 #000;max-width:400px;width:90%;}h1{font-size:28px;margin-bottom:20px;text-transform:uppercase;letter-spacing:2px;border-bottom:4px solid #000;padding-bottom:10px;}input{width:100%;padding:12px;margin:10px 0;border:3px solid #000;font-family:inherit;font-size:16px;background:#fff;box-shadow:4px 4px 0 #000;}button{width:100%;padding:15px;background:#4ECDC4;border:3px solid #000;font-family:inherit;font-size:18px;font-weight:bold;cursor:pointer;box-shadow:4px 4px 0 #000;text-transform:uppercase;margin-top:10px;}button:hover{transform:translate(2px,2px);box-shadow:2px 2px 0 #000;}button:active{transform:translate(4px,4px);box-shadow:0 0 0 #000;}.error{background:#FF6B6B;border:3px solid #000;padding:10px;margin-bottom:15px;font-weight:bold;}</style></head><body><div class="login-box"><h1>> CONSOLE_</h1><?php if(isset($error)):?><div class="error">! <?php echo htmlspecialchars($error);?></div><?php endif;?><form method="POST"><input type="text" name="u" placeholder="Username" required autofocus><input type="password" name="p" placeholder="Password" required><button type="submit">LOGIN</button></form></div></body></html><?php exit;}
+if(isset($_GET['logout'])){session_destroy();safeRedirect();exit;}
+if(!isset($_SESSION['auth'])){if(isset($_POST['u'])&&isset($_POST['p'])){if($_POST['u']===$username&&$_POST['p']===$password){$_SESSION['auth']=true;safeRedirect();exit;}else{$error='Invalid credentials';}}?><!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Console Login</title><style>*{margin:0;padding:0;box-sizing:border-box;}body{background:#FF6B6B;font-family:'Courier New',monospace;display:flex;justify-content:center;align-items:center;height:100vh;border:4px solid #000;}.login-box{background:#FFE66D;border:4px solid #000;padding:40px;box-shadow:8px 8px 0 #000;max-width:400px;width:90%;}h1{font-size:28px;margin-bottom:20px;text-transform:uppercase;letter-spacing:2px;border-bottom:4px solid #000;padding-bottom:10px;}input{width:100%;padding:12px;margin:10px 0;border:3px solid #000;font-family:inherit;font-size:16px;background:#fff;box-shadow:4px 4px 0 #000;}button{width:100%;padding:15px;background:#4ECDC4;border:3px solid #000;font-family:inherit;font-size:18px;font-weight:bold;cursor:pointer;box-shadow:4px 4px 0 #000;text-transform:uppercase;margin-top:10px;}button:hover{transform:translate(2px,2px);box-shadow:2px 2px 0 #000;}button:active{transform:translate(4px,4px);box-shadow:0 0 0 #000;}.error{background:#FF6B6B;border:3px solid #000;padding:10px;margin-bottom:15px;font-weight:bold;}</style></head><body><div class="login-box"><h1>> CONSOLE_</h1><?php if(isset($error)):?><div class="error">! <?php echo htmlspecialchars($error);?></div><?php endif;?><form method="POST"><input type="text" name="u" placeholder="Username" required autofocus><input type="password" name="p" placeholder="Password" required><button type="submit">LOGIN</button></form></div></body></html><?php exit;}
 
 /* BUG 1 FIX: isWritable hanya untuk DELETE/WRITE ops, EDIT/READ bebas semua file */
 function isWritable($path,$basePath,$allowed){
@@ -213,7 +241,7 @@ if(isset($_POST['action'])){
         $newDir=ltrim(substr(dirname($newPath),strlen($basePath)),'/');
         $message='Dipindahkan ke: /'.($newDir?$newDir.'/':'').basename($newPath);
         /* Redirect ke folder tujuan */
-        header('Location: ?dir='.urlencode($newDir).($message?'&msg='.urlencode($message):''));exit;
+        safeRedirect('dir='.urlencode($newDir).($message?'&msg='.urlencode($message):''));
       } else {
         $error='Move gagal';
       }
@@ -459,6 +487,8 @@ const basePath='<?php echo addslashes($basePath);?>';
 const currentDir='<?php echo addslashes($currentDir);?>';
 const allDirs=<?php echo $allDirsJson;?>;
 const maxSize=<?php echo $uploadMaxSize;?>;
+/* Absolute URL aman untuk XHR — hindari HTTP->HTTPS redirect yang bunuh POST body */
+const pageUrl='<?php echo ($isHttps?"https":"http")."://".$_SERVER["HTTP_HOST"].strtok($_SERVER["REQUEST_URI"],"?");?>';
 
 /* === BUG 2 FIX: Upload === */
 const dropZone=document.getElementById('dropZone');
@@ -491,7 +521,7 @@ function handleUpload(file){
   });
   xhr.addEventListener('load',()=>{location.reload();});
   xhr.addEventListener('error',()=>{alert('Upload gagal! Cek permission folder.');progressWrap.style.display='none';});
-  xhr.open('POST','?dir='+encodeURIComponent(currentDir));
+  xhr.open('POST',pageUrl+'?dir='+encodeURIComponent(currentDir));
   xhr.send(formData);
 }
 
